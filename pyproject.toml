@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "isgrounded"
+version = "0.1.0"
+description = "Ask before you ship an LLM answer: is it grounded? A runtime verify-or-abstain gate that cites its evidence or declines."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Annexa" }]
+keywords = ["llm", "rag", "hallucination", "grounding", "abstention", "citations", "eval", "retrieval"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []  # core is provider-agnostic + stdlib; providers/retrievers are extras
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+gemini = ["google-genai>=0.1"]
+tfidf = ["scikit-learn>=1.0", "numpy"]
+embed = ["sentence-transformers>=2.2", "numpy"]
+dev = ["pytest>=7", "ruff"]
+
+[project.urls]
+Homepage = "https://github.com/annexa/isgrounded"
+Source = "https://github.com/annexa/isgrounded"
+
+[project.scripts]
+isgrounded = "isgrounded.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/isgrounded"]
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+# venv / tooling
+.venv/
+venv/
+.env
+.ruff_cache/
+.pytest_cache/
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+# local scratch
+scratch/
+*.local
+# benchmark run logs (regenerate via benchmarks/*.py; curated results live in benchmarks/RESULTS.md)
+benchmarks/out/
