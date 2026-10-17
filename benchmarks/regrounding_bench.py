@@ -22,7 +22,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from isgrounded import GroundedVerifier, TfidfRetriever   # noqa: E402
+from isgrounded import GroundedVerifier, SentenceTransformerRetriever, TfidfRetriever  # noqa: E402
 from isgrounded.llm import llm_from_env                   # noqa: E402
 
 
@@ -63,6 +63,22 @@ def build_corpus(txt_path: str) -> list[tuple[str, str]]:
     return out
 
 
+def _load_key_file(path: str) -> None:
+    """Load API-key env vars from a dotenv-style NAME=VALUE file, so the key stays out of the
+    shell and out of git. Only known API-key names are read; everything else is ignored, and an
+    already-set env var wins."""
+    allow = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, _, val = line.partition("=")
+            name, val = name.strip(), val.strip().strip('"').strip("'")
+            if name in allow and val and not os.environ.get(name):
+                os.environ[name] = val
+
+
 def _find(passages: list[tuple[str, str]], needle: str) -> tuple[str, str] | None:
     nl = needle.lower()
     for sid, text in passages:
@@ -76,9 +92,31 @@ def main():
     ap.add_argument("--corpus", default="benchmarks/data/eu_ai_act_text.txt")
     ap.add_argument("--cases", default="benchmarks/data/regrounding_cases_eu_ai_act.jsonl")
     ap.add_argument("--strict", action="store_true")
+    ap.add_argument("--retriever", choices=["tfidf", "semantic"], default="tfidf",
+                    help="tfidf (lexical, torch-free, default) or semantic "
+                         "(all-mpnet-base-v2 embeddings; rescue rate is no longer a lower bound)")
     ap.add_argument("--label", default=os.environ.get("ISGROUNDED_MODEL", "model"))
+    ap.add_argument("--key-file", default=None,
+                    help="dotenv-style file to read the judge API key from "
+                         "(e.g. your project .env); keeps the key out of the shell")
+    ap.add_argument("--prompt", choices=["default", "strict"], default="default",
+                    help="default = shipped package prompt; strict = experimental "
+                         "strict-abstention variant (benchmarks/prompts_strict.py), shipped "
+                         "prompt is never modified")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+
+    if args.key_file:
+        _load_key_file(args.key_file)
+
+    if args.prompt == "strict":
+        # monkeypatch the gate's prompt constants for this run only; src/isgrounded/prompts.py
+        # is left untouched. gate.py bound the names at import, so patch them on the gate module.
+        sys.path.insert(0, os.path.dirname(__file__))
+        import isgrounded.gate as _gate              # noqa: E402
+        from prompts_strict import STRICT_SYSTEM, STRICT_USER  # noqa: E402
+        _gate.GROUNDING_SYSTEM = STRICT_SYSTEM
+        _gate.GROUNDING_USER = STRICT_USER
 
     path = args.out or f"benchmarks/out/regrounding_{args.label}.txt"
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -92,11 +130,15 @@ def main():
     provider = os.environ.get("ISGROUNDED_LLM", "openai")
     emit(f"building corpus from {args.corpus} ...")
     passages = build_corpus(args.corpus)
-    retriever = TfidfRetriever(passages)
+    if args.retriever == "semantic":
+        emit("loading semantic retriever (all-mpnet-base-v2) ...")
+        retriever = SentenceTransformerRetriever(passages)
+    else:
+        retriever = TfidfRetriever(passages)
     verifier = GroundedVerifier(llm=llm_from_env(), retriever=retriever,
                                 strict=args.strict, retrieval_floor=0.05)
     emit(f"re-grounding | {len(passages)} chunks | judge={args.label} | provider={provider} "
-         f"| strict={args.strict}\n")
+         f"| retriever={args.retriever} | prompt={args.prompt} | strict={args.strict}\n")
 
     cases = [json.loads(ln) for ln in open(args.cases) if ln.strip() and not ln.startswith("//")]
 
@@ -153,7 +195,11 @@ def main():
     if neg_total:
         emit(f"FALSE-RESCUE RATE: {neg_false}/{neg_total} = {neg_false/neg_total:.2f}  (MUST be ~0)")
     emit(f"skipped/mis-designed: {skipped}")
-    emit(f"\nNote: TF-IDF retriever -> rescue rate is a LOWER BOUND; false-rescue is retriever-agnostic.")
+    if args.retriever == "tfidf":
+        emit("\nNote: TF-IDF retriever -> rescue rate is a LOWER BOUND; false-rescue is retriever-agnostic.")
+    else:
+        emit("\nNote: semantic retriever (all-mpnet-base-v2) -> rescue rate is the semantic measurement; "
+             "false-rescue is retriever-agnostic (the gate decides).")
     emit(f"\nsaved {path}")
     sink.close()
 

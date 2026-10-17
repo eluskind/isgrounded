@@ -87,18 +87,32 @@ isgrounded verify --claim "..." --evidence "..."
 
 ## Validation (measured, honest)
 
-Measured with **this package's own prompts**, across four judge models. Full tables + reproducible logs: **[benchmarks/RESULTS.md](benchmarks/RESULTS.md)**.
+Measured with **this package's own prompts**, across four judge models, on both a lexical (TF-IDF) and a semantic (all-mpnet-base-v2) retriever. Full tables + reproducible logs: **[benchmarks/RESULTS.md](benchmarks/RESULTS.md)**.
 
-**The gate is only as sharp as the judge you give it.** On a capable hosted judge (Gemini 2.5 Flash):
+**The gate is only as sharp as the judge you give it , and the retriever doesn't change that.** On a capable hosted judge (Gemini 2.5 Flash):
 - **Gate robustness** , VitaminC, 150 hard contrastive cases: **accuracy 0.90, F1 0.93**, 5 dangerous misses.
-- **Re-grounding** , public EU AI Act text: recovered **5/5** mis-citations (to the correct article) and credited **0 of 4** confabulations. The safety property holds.
+- **Re-grounding** , public EU AI Act text: it recovered every mis-citation it was given and credited **0 of 4** confabulations, on *both* retrievers. The safety property is the gate's, not the retriever's.
 
-On small local open models (`llama3.1:8b`, `mistral:7b`, `gemma3:12b`) the gate is **too lenient**: it under-abstains (VitaminC accuracy 0.60–0.71, mostly missing insufficient-evidence cases) and credits **1–2 of 4** fabrications in re-grounding (one model laundered a fake statutory fine *through* re-grounding). They run, they just aren't reliable judges. **Use a capable judge for high-stakes work.**
+On the small local open models (`llama3.1:8b`, `mistral:7b`, `gemma3:12b`), the **default** prompt under-abstains , on VitaminC they miss insufficient-evidence cases (accuracy 0.60–0.71), and in re-grounding they credit **1–3 of 4** fabrications (one laundered a fake statutory fine through re-grounding). But that turned out to be **largely the prompt, not the model**: a principle-built *strict-abstention* prompt drove fabrications-credited to **0/4 on every model, including the 7B ones.** The shipped prompt was developed on Gemini and simply didn't transfer , the open models aren't "too weak to be safe," they needed a prompt written for them.
+
+The real lesson is the catch: **the prompt is a precision/recall dial, and its right setting is model-dependent.** Under the strict prompt, Gemini and gemma3:12b stay safe *and* keep recovering real mis-citations (gemma improved on both axes) , but the 7–8B models over-correct and start rejecting *everything* (rescue collapses to 1/5 and 0/5). Gemini was **prompt-robust** (identical across prompts and retrievers); the small models are prompt-sensitive in *both* directions. (A related default-prompt finding: a better *retriever* made the most lenient judge worse , mistral 2/4 → 3/4 , because stronger retrieval hands a lenient judge more plausible wrong passages to rationalize.) Full tables: **[RESULTS.md](benchmarks/RESULTS.md)**.
+
+**The takeaway isn't "use a hosted model."** It's **measure your judge and prompt** , if you run a smaller or open model, tune the prompt and check its abstention behavior. This harness shows you how.
 
 **Honest limits:**
 - It validates **faithfulness to your source**, not correctness of the world. A wrong corpus yields faithful-but-wrong answers.
 - It makes **answers** trustworthy; it does not make autonomous high-stakes **decisions** safe. Keep a human in the loop.
-- Small n (VitaminC 150, re-grounding 9), directional, not paper-grade. The re-grounding rescue rate uses a lexical (TF-IDF) retriever and is a **lower bound** vs. a semantic retriever; a semantic re-grounding run is a pending next step.
+- The shipped prompt was developed on Gemini and **under-transfers**: a strict variant recovers safety on open models (0/4 fabrications , RESULTS §2c), but can tip 7–8B models into over-abstention. Tune the prompt per judge and watch **both** failure modes (crediting fabrications *and* rejecting real support).
+- Small n (VitaminC 150; re-grounding 9 cases, 5 mis-citation / 4 confabulation). Directional, not paper-grade , the figures illustrate the *mechanism* (judge quality dominates), not a leaderboard.
+
+## Roadmap
+
+Prompts don't transfer cleanly across models, so the direction is to make the *specification* portable and calibrate per judge, not to chase one universal prompt:
+
+- **Per-model prompt defaults.** A strict-abstention variant already recovers safety (0/4 fabrications) on every model tested, but over-abstains on 7–8B models , so the next step isn't one stricter prompt for all, it's a small set of calibrated defaults (capable vs. small) plus the harness to pick the right one per judge.
+- **Per-model prompt adaptation** , a thin adapter that injects model-specific scaffolding, or compiling the gate as a [DSPy](https://github.com/stanfordnlp/dspy) signature so the prompt is optimized per judge instead of hand-written once.
+- **Cheap deterministic pre-pass** , auto-abstain on zero-signal evidence before calling the judge, to save cost on easy cases. (This only catches *no-overlap* cases; it cannot catch plausible-but-unsupported claims, since those overlap heavily , that judgment stays with the gate.)
+- **Wider benchmarks** , larger VitaminC and re-grounding sets; the current numbers are directional.
 
 ## License
 

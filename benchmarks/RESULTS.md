@@ -36,15 +36,45 @@ Headline: **isgrounded runs on any model, but the gate is only as sharp as the j
 
 **Read:** re-grounding's safety property (don't launder hallucinations) **holds perfectly with a capable judge** (Gemini: 0/4, no slips) but **degrades with weak judges** , mistral even laundered a fabrication *through* re-grounding by crediting the real penalty articles as support for a fake fine. The local judges also mis-credited positives to the wrong article (the "skipped" positives), the same leniency.
 
-**Retriever caveat:** rescue rate uses TF-IDF (lexical), a **lower bound** vs. a semantic retriever; the fabrications-credited (safety) number is retriever-agnostic because the gate decides.
+**Retriever caveat:** the TF-IDF rescue rate is a lower bound vs. semantic retrieval; the fabrications-credited (safety) number is retriever-agnostic because the gate decides. The semantic run below confirms both.
+
+### 2b. Same cases, semantic retriever (all-mpnet-base-v2)
+
+Identical cases and judges, lexical retriever swapped for mpnet embeddings.
+
+| judge | rescue (to correct section) | **fabrications credited /4** | vs. TF-IDF |
+|---|---|---|---|
+| **Gemini 2.5 Flash** | 5/5 | **0/4** ✓ | same (0/4) |
+| gemma3:12b | 3/3 | 1/4 | same (1/4) |
+| llama3.1:8b | 4/4 | 1/4 | same (1/4) |
+| mistral:7b-instruct | 5/5 | **3/4** | **worse (was 2/4)** |
+
+**Read:** swapping the retriever does **not** change the safety picture , it's set by the judge. Gemini stays clean (0/4). The weak judges still credit fabrications, and **mistral got *worse* (2/4 → 3/4)**: a stronger retriever surfaces more plausible-but-wrong passages, which a lenient judge rationalizes into a "rescue." (Rescue denominators shrink for the weak judges because they leniently credit the wrong chunk on some mis-citation cases, counted as skipped , itself a leniency signal.) **Retrieval quality cannot compensate for a judge that won't abstain.**
+
+### 2c. Same cases, semantic retriever, strict-abstention prompt variant
+
+A principle-built strict prompt , lead with the not-grounded default, explicit uncertainty tie-break ("if not certain → not grounded"), reason-before-verdict, explicit not-enough-info line. Built from principle, **not** fit to the cases; the shipped `prompts.py` is unchanged (variant lives in `benchmarks/prompts_strict.py`, selected with `--prompt strict`).
+
+| judge | rescue (to correct section) | **fabrications credited /4** | vs. default prompt |
+|---|---|---|---|
+| **Gemini 2.5 Flash** | 5/5 | **0/4** | unchanged (prompt-robust) |
+| gemma3:12b | 5/5 | **0/4** | fab 1/4 → **0/4**, *and* rescue improved (3/3 w/ skips → clean 5/5) |
+| llama3.1:8b | 1/5 | **0/4** | fab 1/4 → 0/4, but rescue 4/4 → **1/5** (now over-abstains) |
+| mistral:7b-instruct | 0/5 | **0/4** | fab 3/4 → 0/4, but rescue 5/5 → **0/5** (now rejects everything) |
+
+**Read , two findings:**
+1. **The strict prompt drove fabrications-credited to 0/4 on *every* model.** So the open models' laundering was **largely prompt-transfer, not model incapacity** , "too weak to be a safe judge" was the wrong read; they needed a prompt written for them, not a different model.
+2. **But the prompt is a precision/recall dial, and its right setting is model-dependent.** Gemini and gemma3:12b land safe *and* keep recovering real mis-citations (gemma improved on both axes); the 7–8B models (llama, mistral) over-correct under the same instruction and reject everything (rescue collapses). Gemini is prompt-robust (identical across prompts and retrievers); the small models are prompt-sensitive in **both** directions.
+
+**Lesson:** safety is recoverable by prompting on any of these models, but you tune the prompt **per model** and watch **both** failure modes , under-abstention (credits fabrications) *and* over-abstention (rejects real support). This is the precision/recall tradeoff made concrete.
 
 ---
 
 ## 3. What to take from this
 
 - **Use a capable judge for anything high-stakes.** On Gemini 2.5 Flash: VitaminC 0.90 / 5 misses, re-grounding 5/5 rescue / 0 fabrications credited. That's the recommended operating point.
-- **Small local open models (7–12B) are too lenient** to be safe judges here, they under-abstain on VitaminC (nei 0.18–0.46) and credit 1–2 of 4 fabrications in re-grounding. They run, but the reliability isn't there.
+- **Small local open models (7–12B) under-abstain *on this prompt*** , they miss insufficient-evidence cases on VitaminC (nei 0.18–0.46) and credit 1–3 of 4 fabrications in re-grounding. Caveat: these prompts were developed on Gemini, so this measures **prompt transfer as much as model capability** , the open-model numbers are "this prompt, untuned," not the model's ceiling. The fix is per-model prompt tuning (an explicit abstention rule, or DSPy-style per-judge compilation), not "only use a hosted model."
 - **`strict` (multi-judge) mode is unlikely to rescue a weak judge**, voting across seeds of the same model reduces variance, not a systematic leniency *bias*. (Untested here; stated as a limitation, not a measurement.)
-- **n is small** (VitaminC 150; re-grounding 9). Directional and honest, not paper-grade. Wider case sets and a semantic-retriever re-grounding run are the obvious next steps.
+- **n is small** (VitaminC 150; re-grounding 9). Directional and honest, not paper-grade. The semantic-retriever run (§2b) is done; wider case sets are the obvious next step.
 
 *All numbers reproducible: `benchmarks/vitaminc_bench.py` and `benchmarks/regrounding_bench.py`, model via `ISGROUNDED_LLM` / `ISGROUNDED_MODEL`.*

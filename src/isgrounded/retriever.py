@@ -44,10 +44,12 @@ class TfidfRetriever:
 
 
 class SentenceTransformerRetriever:
-    """Semantic retriever using sentence-transformers embeddings (extra: isgrounded[embed]).
+    """Convenience semantic retriever using sentence-transformers embeddings (extra: isgrounded[embed]).
 
-    The production-grade default: ranks by meaning, not word overlap, so it recovers
-    paraphrased support a lexical retriever misses. Needs `sentence-transformers` (and torch).
+    A zero-wiring semantic option for examples and the benchmarks: ranks by meaning, not word
+    overlap, so it recovers paraphrased support a lexical retriever misses. Needs
+    `sentence-transformers` (and torch). For production, bring your own embedding-based retriever
+    (any object with `.search(query, k) -> list[Citation]`).
     """
 
     def __init__(self, passages: list[tuple[str, str]],
