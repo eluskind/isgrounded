@@ -30,6 +30,20 @@ from isgrounded.gate import grounded_gate       # noqa: E402
 from isgrounded.llm import llm_from_env          # noqa: E402
 
 
+def _load_key_file(path: str) -> None:
+    """Load API-key env vars from a dotenv-style NAME=VALUE file (keeps the key out of the shell).
+    Only known API-key names are read; an already-set env var wins."""
+    allow = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"}
+    for line in open(path, encoding="utf-8"):
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, val = line.partition("=")
+        name, val = name.strip(), val.strip().strip('"').strip("'")
+        if name in allow and val and not os.environ.get(name):
+            os.environ[name] = val
+
+
 def load(path: str, limit: int):
     rows = []
     for line in open(path):
@@ -77,9 +91,26 @@ def main():
     ap.add_argument("--data", default="benchmarks/data/vitaminc_sample.jsonl")
     ap.add_argument("--limit", type=int, default=150)
     ap.add_argument("--strict", action="store_true", help="use the multi-judge panel")
+    ap.add_argument("--prompt", choices=["default", "strict"], default="default",
+                    help="default = shipped package prompt; strict = experimental "
+                         "strict-abstention variant (benchmarks/prompts_strict.py); shipped "
+                         "prompt is never modified")
+    ap.add_argument("--key-file", default=None,
+                    help="dotenv-style file to read the judge API key from (keeps it out of the shell)")
     ap.add_argument("--label", default=os.environ.get("ISGROUNDED_MODEL", "model"))
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+
+    if args.key_file:
+        _load_key_file(args.key_file)
+
+    if args.prompt == "strict":
+        # monkeypatch the gate's prompt for this run only; src/isgrounded/prompts.py untouched.
+        sys.path.insert(0, os.path.dirname(__file__))
+        import isgrounded.gate as _gate              # noqa: E402
+        from prompts_strict import STRICT_SYSTEM, STRICT_USER  # noqa: E402
+        _gate.GROUNDING_SYSTEM = STRICT_SYSTEM
+        _gate.GROUNDING_USER = STRICT_USER
 
     provider = os.environ.get("ISGROUNDED_LLM", "openai")
     print(f"building gate (ISGROUNDED_LLM={provider}, label={args.label})...", flush=True)
@@ -97,8 +128,8 @@ def main():
         sink.write(x + "\n")
         sink.flush()
 
-    emit(f"VitaminC | {len(cases)} cases | judge={args.label} | strict={args.strict} "
-         f"| provider={provider}")
+    emit(f"VitaminC | {len(cases)} cases | judge={args.label} | prompt={args.prompt} "
+         f"| strict={args.strict} | provider={provider}")
     rows = []
     for i, (claim, ev, label) in enumerate(cases, 1):
         grounded, _reason = grounded_gate(llm, claim, ev, strict=args.strict)

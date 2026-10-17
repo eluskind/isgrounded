@@ -17,7 +17,25 @@ Headline: **isgrounded runs on any model, but the gate is only as sharp as the j
 | mistral:7b-instruct (local) | 0.71 | 0.74 | 0.91 | 0.62 | 0.88 | 0.78 | 0.46 | 38 |
 | llama3.1:8b (local) | 0.60 | 0.58 | 0.98 | 0.41 | 0.98 | 0.64 | 0.18 | 59 |
 
-**Read:** the local open models fail the same way, too lenient. High precision (when they abstain, they're right) but low recall, concentrated on the **nei** row (0.18–0.46): they credit insufficient-evidence claims. The hosted model is balanced (nei 0.90, only 5 dangerous misses). Ordering: Gemini ≫ gemma3 ≈ mistral > llama3.1.
+**Read:** on the default prompt the local open models fail the same way, too lenient. High precision (when they abstain, they're right) but low recall, concentrated on the **nei** row (0.18–0.46): they credit insufficient-evidence claims. The hosted model is balanced (nei 0.90, only 5 dangerous misses). Ordering: Gemini ≫ gemma3 ≈ mistral > llama3.1.
+
+### 1b. VitaminC under the strict-abstention prompt
+
+Same 150 cases and judges, the experimental strict prompt (`--prompt strict`). Default → strict:
+
+| judge | accuracy | supported credited (recall) | missed (dangerous) | over-abstain (on supported) |
+|---|---|---|---|---|
+| **Gemini 2.5 Flash** | 0.90 → **0.87** | 0.80 → **0.68** | 5 → 4 | 10 → 16 |
+| gemma3:12b | 0.71 → **0.83** | 0.94 → 0.80 | 40 → **16** | 3 → 10 |
+| llama3.1:8b | 0.60 → **0.77** | 0.98 → 0.68 | 59 → **19** | 1 → 16 |
+| mistral:7b-instruct | 0.71 → 0.73 | 0.88 → **0.28** | 38 → **5** | 6 → **36** |
+
+**Read:** the strict prompt is a precision/recall dial pulled one way , it **reduces dangerous misses on every model** (safer) and **costs supported-recall on every model** (over-abstains more). The *net* depends on where the model started:
+- **Net-negative for the already-balanced capable judge** , Gemini acc 0.90 → 0.87 (it was fine; strict just over-abstains).
+- **Net-positive for the too-lenient mid models** , gemma3 0.71 → 0.83, llama3.1 0.60 → 0.77 (the safety gain outweighs the recall cost).
+- **Degenerate for mistral** , accuracy flat (0.71 → 0.73) but supported collapses to **0.28**: it now rejects 72% of genuinely-supported claims. Safe but useless.
+
+**Conclusion: there is no single best prompt.** Strict is the right trade only for a judge that was over-crediting; it *hurts* one that was already balanced, and it can break a small model into reject-everything. The shipped default stays the default because it's best for the capable judge; strict is a documented option for a too-lenient judge, applied after measuring. Tune per model, watch **both** failure modes.
 
 ---
 

@@ -1,21 +1,28 @@
 # isgrounded
 
-**Before you ship an LLM answer, ask: is it grounded?**
+**A runtime verify-or-abstain grounding gate for LLM/RAG pipelines , with bounded re-grounding (rescues a mis-citation without laundering a hallucination) and a harness to measure how reliable your judge actually is.**
 
-`isgrounded` is a small, runtime **verify-or-abstain** gate for RAG and LLM pipelines. It credits a claim only when the retrieved evidence actually supports it, with a citation, and **abstains** otherwise instead of guessing. It's model-agnostic and retriever-agnostic: a wrapper, not a model, not a post-hoc score.
+`isgrounded` is a small, runtime **verify-or-abstain** gate for RAG and LLM pipelines: it credits a claim only when the evidence actually supports it, with a citation, and **abstains** otherwise instead of guessing. The gate itself is deliberately simple , a strict LLM judge. The real work is the two things built around it:
+
+- **Bounded re-grounding.** When the cited passage is the wrong one, it re-searches your corpus *by the claim* and re-verifies at the **same strict bar** , so it rescues a *mis-citation* without ever laundering a *hallucination*. "Cited" ends up meaning **verified**, not plausible. (See [How it works](#how-it-works).)
+- **A judge-measurement harness.** A grounding gate is only as good as the model and prompt behind it , so isgrounded ships the benchmarks to measure *your* judge and prompt, not just a badge that says "grounded." (See [Measure your judge](#measure-your-judge).)
+
+Model-agnostic and retriever-agnostic: a wrapper, not a model, not a post-hoc score.
 
 ```python
 from isgrounded import is_grounded
 
+# Grounded , the evidence entails the claim (6000 > 5000), even though the number differs.
 is_grounded(
-    claim="The system encrypts customer data at rest.",
-    evidence="All records in our data stores are encrypted on disk using AES-256.",
+    claim="Dragon Con had over 5000 guests.",
+    evidence="Among the more than 6000 guests and performers at the 2009 convention were Patrick Stewart, William Shatner, and Leonard Nimoy.",
 )  # -> True
 
+# Not grounded , same topic, but the evidence doesn't establish the specific claim.
 is_grounded(
-    claim="The system encrypts customer data at rest.",
-    evidence="Our team values security and reviews access quarterly.",
-)  # -> False  (related topic, doesn't actually support the claim)
+    claim="Dragon Con had over 5000 guests.",
+    evidence="Among the more than 512 guests and performers at the 2009 convention were Patrick Stewart, William Shatner, and Leonard Nimoy.",
+)  # -> False  ("more than 512" doesn't support "over 5000")
 ```
 
 ## Why
@@ -81,13 +88,39 @@ isgrounded verify --claim "..." --evidence "..."
 
 ## How it works
 
-1. **Gate** — a strict judge decides whether the evidence *directly supports the specific claim* (not a related topic, not a more general statement, not a plausible inference). Single-judge by default; `strict=True` runs a majority-of-3 panel.
-2. **Re-grounding** — on "ungrounded", re-search the corpus by the **claim** (not the original query), drop already-cited passages, and re-verify with the **same strict gate**. A mis-citation (support is in the corpus, wrong chunk retrieved) gets rescued; a confabulation (support is nowhere) does not, because the bar is unchanged.
-3. **Abstain** — if it still can't ground the claim, it returns `ungrounded` rather than guessing. Fail-closed: on a provider error or an unparseable judge response, it abstains.
+**1. Input , a claim and its evidence.** Pass `is_grounded(claim, evidence)`: the claim an LLM produced, plus the evidence it's supposedly based on. No evidence in hand? Pass a retriever and it fetches the top passages *by the claim* first.
 
-## Validation (measured, honest)
+**2. The gate , a strict judge decides support.** Claim + evidence go to an LLM judge with one job: does the evidence **state or entail** the claim? Strict by design , it credits paraphrase and entailment, but rejects a different subject, a contradiction, a **missing specific element** (a number/date/entity the claim needs but the evidence omits), or something merely related or plausible. Returns a verdict + one-sentence reason as rigid JSON. Single judge by default; `strict=True` runs a 3-vote panel (majority, two-then-tiebreak).
 
-Measured with **this package's own prompts**, across four judge models, on both a lexical (TF-IDF) and a semantic (all-mpnet-base-v2) retriever. Full tables + reproducible logs: **[benchmarks/RESULTS.md](benchmarks/RESULTS.md)**.
+**3. Fail-closed.** If the judge errors or returns anything unparseable → treated as **not grounded**. When in doubt, abstain , a false "grounded" is the dangerous error.
+
+**4. If grounded → return it with the citation.** Verdict `grounded`, supporting passage attached.
+
+**5. If not grounded → bounded re-grounding (the core mechanism).** The first evidence may have been the **wrong chunk**, so:
+- re-search the corpus **by the claim** (not the original query);
+- drop passages already cited, and drop near-zero-overlap passages (a retrieval floor) so it can't grab junk;
+- re-verify the fresh top passages with the **same strict gate**.
+
+Supported now → verdict `recovered`. Still not → abstain. **The safety property:** a *mis-citation* (support was in the corpus, wrong chunk cited first) gets rescued; a *confabulation* (support nowhere) does not , because the bar never dropped. This is what makes "cited" mean *verified*.
+
+**6. Output , a decision you can act on.** `grounded` (True/False) · `verdict` (grounded | ungrounded | recovered) · `reason` · `citations`. Every "ungrounded" is a **signal** , a hole in your knowledge base, not just a failure.
+
+### How it's built
+- **Model-agnostic** , an `LLM` protocol; bring OpenAI, Ollama, any OpenAI-compatible endpoint, or Gemini via env. It's a wrapper, not a model.
+- **Retriever-agnostic** , a `Retriever` protocol (`.search`); wrap your LangChain / LlamaIndex / vector DB, or use a bundled one (conveniences , BYO for production).
+- **Fail-closed abstention** is the default stance throughout.
+- **The prompt is the gate's behavioral core** , and, per the [benchmarks](#measure-your-judge), its exact wording is a precision/recall dial you tune per model.
+
+## Measure your judge
+
+A grounding gate is only as reliable as the judge and prompt behind it , so isgrounded ships the harness to **measure your own setup**, not just a number I'm asking you to trust. Point it at your model (same env as [Install](#install)) and run:
+
+```bash
+python benchmarks/vitaminc_bench.py    --label my-model   # gate robustness: abstain vs. credit
+python benchmarks/regrounding_bench.py --label my-model   # re-grounding: rescue vs. false-rescue
+```
+
+Here's what that harness found across four judge models (this package's own prompts, on both a lexical and a semantic retriever). Full tables + reproducible logs: **[benchmarks/RESULTS.md](benchmarks/RESULTS.md)**.
 
 **The gate is only as sharp as the judge you give it , and the retriever doesn't change that.** On a capable hosted judge (Gemini 2.5 Flash):
 - **Gate robustness** , VitaminC, 150 hard contrastive cases: **accuracy 0.90, F1 0.93**, 5 dangerous misses.
