@@ -120,6 +120,8 @@ python benchmarks/vitaminc_bench.py    --label my-model   # gate robustness: abs
 python benchmarks/regrounding_bench.py --label my-model   # re-grounding: rescue vs. false-rescue
 ```
 
+**Small sets by design** , 150 VitaminC cases and 9 re-grounding cases. Read these as directional: they show the mechanism, not a leaderboard.
+
 Here's what that harness found across four judge models (this package's own prompts, on both a lexical and a semantic retriever). Full tables + reproducible logs: **[benchmarks/RESULTS.md](benchmarks/RESULTS.md)**.
 
 **The gate is only as sharp as the judge you give it , and the retriever doesn't change that.** On a capable hosted judge (Gemini 2.5 Flash):
