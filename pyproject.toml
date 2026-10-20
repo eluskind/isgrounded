@@ -9,7 +9,7 @@ description = "Ask before you ship an LLM answer: is it grounded? A runtime veri
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-authors = [{ name = "Annexa" }]
+authors = [{ name = "Emily Luskind" }]
 keywords = ["llm", "rag", "hallucination", "grounding", "abstention", "citations", "eval", "retrieval"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -28,8 +28,8 @@ embed = ["sentence-transformers>=2.2", "numpy"]
 dev = ["pytest>=7", "ruff"]
 
 [project.urls]
-Homepage = "https://github.com/annexa/isgrounded"
-Source = "https://github.com/annexa/isgrounded"
+Homepage = "https://github.com/eluskind/isgrounded"
+Source = "https://github.com/eluskind/isgrounded"
 
 [project.scripts]
 isgrounded = "isgrounded.cli:main"

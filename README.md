@@ -149,4 +149,4 @@ Prompts don't transfer cleanly across models, so the direction is to make the *s
 
 ## License
 
-Apache-2.0. Built by [Annexa](https://github.com/annexa).
+Apache-2.0. Built by [Emily Luskind](https://github.com/eluskind).
